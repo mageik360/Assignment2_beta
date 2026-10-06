@@ -83,7 +83,8 @@ def reconstruct_from_principal_components(projected_data: np.ndarray, principal_
 def pca(data: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Perform PCA on the data and return the projected data onto the top k principal components,
-    along with the principal components and the mean used for centering.
+    along with the principal components, the mean used for centering, and all sorted eigenvalues
+    (the variance along each principal component).
     """
     
     data_matrix = data
@@ -96,7 +97,7 @@ def pca(data: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     sorted_eigenvalues, sorted_eigenvectors = sort_eigenvectors(eigenvalues, eigenvectors)
     principal_components = select_top_k_eigenvectors(sorted_eigenvectors, k)
     projected_data = project_onto_principal_components(centered_data, principal_components)
-    return projected_data, principal_components, mean
+    return projected_data, principal_components, mean, sorted_eigenvalues
 
 IMAGE_COUNT = 500  # Number of images to load for PCA
 K = 100  # Number of principal components to keep
@@ -127,17 +128,65 @@ def compression_ratio(n_images: int, n_pixels: int, k: int) -> float:
     compressed_size = n_images * k + n_pixels * k + n_pixels
     return original_size / compressed_size
 
+def components_for_variance(eigenvalues: np.ndarray, threshold: float) -> int:
+    """
+    Smallest number of principal components whose cumulative explained variance reaches the threshold.
+    """
+    cumulative = np.cumsum(eigenvalues) / np.sum(eigenvalues)
+    return int(np.searchsorted(cumulative, threshold) + 1)
+
+def plot_explained_variance(eigenvalues: np.ndarray, k: int, threshold: float = 0.95):
+    """
+    Plot the variance explained by each principal component (top) and the cumulative explained
+    variance (bottom), marking the chosen k and the number of components needed for the threshold.
+    """
+    explained = eigenvalues / np.sum(eigenvalues) * 100
+    cumulative = np.cumsum(explained)
+    components = np.arange(1, len(eigenvalues) + 1)
+    k_threshold = components_for_variance(eigenvalues, threshold)
+
+    series_color, text_color, muted_color, grid_color = "#2a78d6", "#0b0b0b", "#52514e", "#e4e3df"
+    fig, (ax_each, ax_cum) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+
+    ax_each.plot(components, explained, color=series_color, linewidth=2)
+    ax_each.set_title("Variance explained by each principal component", color=text_color, loc="left")
+    ax_each.set_ylabel("Explained variance (%)", color=muted_color)
+
+    ax_cum.plot(components, cumulative, color=series_color, linewidth=2)
+    ax_cum.set_title("Cumulative variance explained", color=text_color, loc="left")
+    ax_cum.set_ylabel("Cumulative explained variance (%)", color=muted_color)
+    ax_cum.set_xlabel("Number of principal components (k)", color=muted_color)
+    ax_cum.set_ylim(0, 100)
+    ax_cum.axhline(threshold * 100, color=muted_color, linewidth=1, linestyle="--")
+    ax_cum.annotate(f"{threshold:.0%} reached at k={k_threshold}", (k_threshold, threshold * 100),
+                    xytext=(8, -16), textcoords="offset points", color=text_color)
+    ax_cum.plot(k, cumulative[k - 1], "o", color=series_color, markersize=8, markeredgecolor="white", markeredgewidth=2)
+    ax_cum.annotate(f"chosen k={k}: {cumulative[k - 1]:.1f}%", (k, cumulative[k - 1]),
+                    xytext=(8, -20), textcoords="offset points", color=text_color)
+
+    for ax in (ax_each, ax_cum):
+        ax.grid(True, color=grid_color, linewidth=0.8)
+        ax.set_axisbelow(True)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.spines[["left", "bottom"]].set_color(grid_color)
+        ax.tick_params(colors=muted_color)
+    fig.tight_layout()
+    return fig
+
 if __name__ == "__main__":
     images = ready_images()
     n_images, n_pixels = images.shape
     print("Data matrix shape:", images.shape)
 
     k = K
-    projected_data, principal_components, mean = pca(data=images, k=k)
+    projected_data, principal_components, mean, eigenvalues = pca(data=images, k=k)
     reconstructed_images = reconstruct_from_principal_components(projected_data, principal_components, mean)
     print("Projected data shape:", projected_data.shape)
     print(f"MSE: {mean_squared_error(images, reconstructed_images):.5f}")
     print(f"Compression ratio: {compression_ratio(n_images, n_pixels, k):.2f}")
+    print(f"Variance explained by k={k}: {np.sum(eigenvalues[:k]) / np.sum(eigenvalues):.1%}")
+    for threshold in (0.90, 0.95, 0.99):
+        print(f"Components needed for {threshold:.0%} variance: {components_for_variance(eigenvalues, threshold)}")
 
     # Show the original and reconstructed images for comparison, on the same [0, 1] scale
     plt.figure(figsize=(2 * N_SHOWN, 4))
@@ -157,4 +206,9 @@ if __name__ == "__main__":
     out_path = os.path.join(out_dir, f"PCA_N{n_images}_K{k}.png")
     plt.savefig(out_path, dpi=150)
     print("Saved plot to", out_path)
+
+    variance_figure = plot_explained_variance(eigenvalues, k)
+    variance_path = os.path.join(out_dir, f"PCA_variance_N{n_images}_K{k}.png")
+    variance_figure.savefig(variance_path, dpi=150)
+    print("Saved plot to", variance_path)
     plt.show()
