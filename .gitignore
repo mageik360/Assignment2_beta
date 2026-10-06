@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 intel-image-classification/
 intel-image-classification (1).zip
+.env
