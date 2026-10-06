@@ -26,19 +26,30 @@ def image_to_matrix(image: np.ndarray) -> np.ndarray:
     """
     return image.reshape(image.shape[0], -1)
   
-def compute_covariance_matrix(data: np.ndarray) -> np.ndarray:
+def compute_covariance_matrix(centered_data: np.ndarray) -> np.ndarray:
     """
-    Compute the covariance matrix of the image data.
+    Compute the covariance matrix of the image data in its small (Gram) form.
+
+    The pixel covariance C = Xc^T Xc / (N-1) is d x d (22500 x 22500 for 150x150 images), which is
+    too large to decompose. With fewer images than pixels we instead use G = Xc Xc^T / (N-1), which
+    is only N x N and has the same non-zero eigenvalues as C (the "Gram trick" from Eigenfaces).
     """
-    mean_centered_data = data - np.mean(data, axis=0)
-    covariance_matrix = np.cov(mean_centered_data, rowvar=False)
-    return covariance_matrix
-  
-def calculate_eigenvalues_and_eigenvectors(covariance_matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    n_images = centered_data.shape[0]
+    return np.dot(centered_data, centered_data.T) / (n_images - 1)
+
+def calculate_eigenvalues_and_eigenvectors(gram_matrix: np.ndarray, centered_data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    Calculate the eigenvalues and eigenvectors of the covariance matrix.
+    Calculate the eigenvalues and eigenvectors of the pixel covariance matrix via the Gram matrix.
+
+    If G u = lambda u, then C (Xc^T u) = lambda (Xc^T u), so Xc^T u (normalized to unit length) is an
+    eigenvector of the pixel covariance with the same eigenvalue.
     """
-    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)  # eigh: covariance is symmetric
+    eigenvalues, gram_eigenvectors = np.linalg.eigh(gram_matrix)  # eigh: the matrix is symmetric
+    # Centering leaves at most N-1 non-zero eigenvalues; the zero ones have no pixel-space eigenvector
+    nonzero = eigenvalues > 1e-10 * eigenvalues.max()
+    eigenvalues, gram_eigenvectors = eigenvalues[nonzero], gram_eigenvectors[:, nonzero]
+    eigenvectors = np.dot(centered_data.T, gram_eigenvectors)
+    eigenvectors /= np.linalg.norm(eigenvectors, axis=0)
     return eigenvalues, eigenvectors
   
 def sort_eigenvectors(eigenvalues: np.ndarray, eigenvectors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -77,16 +88,19 @@ def pca(data: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     data_matrix = data
     mean = np.mean(data_matrix, axis=0)
-    covariance_matrix = compute_covariance_matrix(data_matrix)
-    eigenvalues, eigenvectors = calculate_eigenvalues_and_eigenvectors(covariance_matrix)
+    centered_data = data_matrix - mean
+    covariance_matrix = compute_covariance_matrix(centered_data)
+    eigenvalues, eigenvectors = calculate_eigenvalues_and_eigenvectors(covariance_matrix, centered_data)
+    if k > eigenvectors.shape[1]:
+        raise ValueError(f"k={k} is larger than the {eigenvectors.shape[1]} non-zero components available; use more images or a smaller k")
     sorted_eigenvalues, sorted_eigenvectors = sort_eigenvectors(eigenvalues, eigenvectors)
     principal_components = select_top_k_eigenvectors(sorted_eigenvectors, k)
-    projected_data = project_onto_principal_components(data_matrix - mean, principal_components)
+    projected_data = project_onto_principal_components(centered_data, principal_components)
     return projected_data, principal_components, mean
 
 IMAGE_COUNT = 500  # Number of images to load for PCA
 K = 100  # Number of principal components to keep
-IMAGE_SIZE = (64, 64)  # All images are resized to this so they share the same pixel columns
+IMAGE_SIZE = (150, 150)  # Native size of the dataset; odd-sized images are resized to match
 N_SHOWN = 5  # Number of images to display in the comparison
 
 def ready_images() -> np.ndarray:
