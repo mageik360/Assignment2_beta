@@ -5,3 +5,4 @@ __pycache__/
 intel-image-classification/
 intel-image-classification (1).zip
 .env
+/out
