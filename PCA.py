@@ -100,7 +100,7 @@ def pca(data: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return projected_data, principal_components, mean, sorted_eigenvalues
 
 IMAGE_COUNT = 500  # Number of images to load for PCA
-K = 100  # Number of principal components to keep
+K = 346  # Number of principal components to keep
 IMAGE_SIZE = (150, 150)  # Native size of the dataset; odd-sized images are resized to match
 N_SHOWN = 5  # Number of images to display in the comparison
 
@@ -173,6 +173,58 @@ def plot_explained_variance(eigenvalues: np.ndarray, k: int, threshold: float = 
     fig.tight_layout()
     return fig
 
+def error_compression_tradeoff(images: np.ndarray, ks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Reconstruction MSE and compression ratio for each k in ks. PCA is fitted once with the largest k;
+    the top k components of that fit are the same as fitting with k directly, so we just slice.
+    """
+    n_images, n_pixels = images.shape
+    projected_data, principal_components, mean, _ = pca(data=images, k=int(max(ks)))
+    mses, ratios = [], []
+    for k in ks:
+        reconstructed = reconstruct_from_principal_components(projected_data[:, :k], principal_components[:, :k], mean)
+        mses.append(mean_squared_error(images, reconstructed))
+        ratios.append(compression_ratio(n_images, n_pixels, k))
+    return np.array(mses), np.array(ratios)
+
+def plot_error_compression_tradeoff(ks: np.ndarray, mses: np.ndarray, ratios: np.ndarray, k: int):
+    """
+    Plot reconstruction MSE against k (left) and against the compression ratio (right), marking the
+    chosen k. Two panels instead of a dual axis, since MSE and ratio are on different scales.
+    """
+    series_color, text_color, muted_color, grid_color = "#2a78d6", "#0b0b0b", "#52514e", "#e4e3df"
+    fig, (ax_k, ax_ratio) = plt.subplots(1, 2, figsize=(12, 4.5))
+    chosen = int(np.argmin(np.abs(ks - k)))
+
+    ax_k.plot(ks, mses, color=series_color, linewidth=2)
+    ax_k.set_title("Reconstruction error vs. number of components", color=text_color, loc="left")
+    ax_k.set_xlabel("Number of principal components (k)", color=muted_color)
+    ax_k.set_ylabel("Mean squared error", color=muted_color)
+    ax_k.plot(ks[chosen], mses[chosen], "o", color=series_color, markersize=8, markeredgecolor="white", markeredgewidth=2)
+    ax_k.annotate(f"k={ks[chosen]}: MSE {mses[chosen]:.4f}", (ks[chosen], mses[chosen]),
+                  xytext=(8, 8), textcoords="offset points", color=text_color)
+
+    ax_ratio.plot(ratios, mses, color=series_color, linewidth=2)
+    ax_ratio.set_title("Reconstruction error vs. compression", color=text_color, loc="left")
+    ax_ratio.set_xscale("log")
+    ax_ratio.set_xlabel("Compression ratio (original / stored values, log scale)", color=muted_color)
+    ax_ratio.set_ylabel("Mean squared error", color=muted_color)
+    ax_ratio.axvline(1, color=muted_color, linewidth=1, linestyle="--")
+    ax_ratio.annotate("no compression", (1, mses.max()), xytext=(6, -12), textcoords="offset points", color=muted_color)
+    ax_ratio.plot(ratios[chosen], mses[chosen], "o", color=series_color, markersize=8, markeredgecolor="white", markeredgewidth=2)
+    ax_ratio.annotate(f"k={ks[chosen]}: {ratios[chosen]:.2f}x", (ratios[chosen], mses[chosen]),
+                      xytext=(10, -4), textcoords="offset points", color=text_color)
+
+    for ax in (ax_k, ax_ratio):
+        ax.set_ylim(bottom=0)
+        ax.grid(True, color=grid_color, linewidth=0.8)
+        ax.set_axisbelow(True)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.spines[["left", "bottom"]].set_color(grid_color)
+        ax.tick_params(colors=muted_color)
+    fig.tight_layout()
+    return fig
+
 if __name__ == "__main__":
     images = ready_images()
     n_images, n_pixels = images.shape
@@ -211,4 +263,17 @@ if __name__ == "__main__":
     variance_path = os.path.join(out_dir, f"PCA_variance_N{n_images}_K{k}.png")
     variance_figure.savefig(variance_path, dpi=150)
     print("Saved plot to", variance_path)
+
+    # Error analysis: sweep k to see how reconstruction error trades off against compression
+    table_ks = [k_i for k_i in (1, 5, 10, 25, 50, 100, 200, k, len(eigenvalues)) if k_i <= len(eigenvalues)]
+    ks = np.unique(np.concatenate([np.linspace(1, len(eigenvalues), 50, dtype=int), table_ks]))
+    mses, ratios = error_compression_tradeoff(images, ks)
+    print(f"{'k':>5} {'MSE':>9} {'ratio':>7}")
+    for k_i in table_ks:
+        i = int(np.searchsorted(ks, k_i))
+        print(f"{ks[i]:>5} {mses[i]:>9.5f} {ratios[i]:>7.2f}")
+    tradeoff_figure = plot_error_compression_tradeoff(ks, mses, ratios, k)
+    tradeoff_path = os.path.join(out_dir, f"PCA_tradeoff_N{n_images}_K{k}.png")
+    tradeoff_figure.savefig(tradeoff_path, dpi=150)
+    print("Saved plot to", tradeoff_path)
     plt.show()
