@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 .DS_Store
-intel-image-classification/
-intel-image-classification (1).zip
+intel-image-classification*
 .env
 /out
