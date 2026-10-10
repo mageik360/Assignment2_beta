@@ -9,18 +9,17 @@ def make_params(**overrides) -> cv2.SimpleBlobDetector_Params:
     params = cv2.SimpleBlobDetector_Params()
     params.minThreshold = 20
     params.maxThreshold = 220
+    params.thresholdStep = 5
     params.minRepeatability = 3
     params.minDistBetweenBlobs = 7
+    params.filterByArea = True
     params.minArea = 15
     params.maxArea = 5000
-    params.filterByArea = True
     params.filterByCircularity = False
     params.filterByConvexity = True
     params.minConvexity = 0.8
     params.filterByInertia = True
     params.minInertiaRatio = 0.05
-    params.thresholdStep = 5
-    params.filterByColor = True
     params.blobColor = 0
     
 
@@ -171,15 +170,15 @@ def collect_stats(root: str, params, blur=False, max_per_category=None) -> pd.Da
     return pd.DataFrame(rows)
 
 
-def sweep_param(path, param_name, start, end, n=5, blur=False, **fixed_params):
+def sweep_param(path, param_name, values, blur=False, **fixed_params):
     """
-    Run blob detection on one image while varying a single parameter
-    from start to end in n evenly spaced steps. Extra keyword arguments are
-    passed to make_params, e.g. to keep minArea <= maxArea during a maxArea sweep.
+    Run blob detection on one image once for each value in values for a single
+    parameter. Extra keyword arguments are passed to make_params, e.g. to keep
+    minArea <= maxArea during a maxArea sweep.
     """
     path = Path(path)
     image = load_image.load_image(str(path))
-    values = np.linspace(start, end, n)
+    n = len(values)
 
     fig, axes = plt.subplots(1, n, figsize=(3 * n, 3.5))
     axes = np.atleast_1d(axes)
@@ -187,7 +186,7 @@ def sweep_param(path, param_name, start, end, n=5, blur=False, **fixed_params):
     for ax, value in zip(axes, values):
         params = make_params(**fixed_params, **{param_name: float(value)})
         keypoints, inverted_keypoints = detect_blobs(image, params, blur=blur)
-        drawn = draw_blobs_bbox(image, keypoints, inverted_keypoints, params, blur=blur)
+        drawn = draw_blobs(image, keypoints, inverted_keypoints)
 
         ax.imshow(cv2.cvtColor(drawn, cv2.COLOR_BGR2RGB))
         ax.set_title(f"{param_name} = {value:.2f}\n{len(keypoints)} red / {len(inverted_keypoints)} blue", fontsize=9)
@@ -195,6 +194,12 @@ def sweep_param(path, param_name, start, end, n=5, blur=False, **fixed_params):
 
     fig.suptitle(path.name)
     plt.tight_layout()
+
+    out_dir = Path(__file__).resolve().parent / "out"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"blob_sweep_{path.stem}_{param_name}{'_blur' if blur else ''}.png"
+    fig.savefig(out_path, dpi=150)
+    print("Saved plot to", out_path)
     plt.show()
 
 if __name__ == "__main__":
@@ -208,4 +213,25 @@ if __name__ == "__main__":
         display_images_side_by_side(image, drawn_image)
     """
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
-    sweep_param(path, "minArea", 20, 35, n=4)
+
+    # Do blobdetection on path with different parameters and display the results
+    image = load_image.load_image(path)
+    params = make_params()
+
+    keypoints, inverted_keypoints = detect_blobs(image, params, blur=False)
+    print_blob_stats(keypoints, "Original (red) ")
+    print_blob_stats(inverted_keypoints, "Inverted (blue) ")
+
+    drawn = draw_blobs(image, keypoints, inverted_keypoints)
+    #display_images_side_by_side(image, drawn)
+
+    # Thresholds
+    #sweep_param(path, "minArea", [20, 25, 30, 35], blur=False)
+    #sweep_param(path, "maxArea", [20, 75, 125, 180], blur=False)
+    #sweep_param(path, "minThreshold", [0, 25, 50, 75], blur=False)
+    #sweep_param(path, "maxThreshold", [100, 125, 150, 175], blur=False)
+    #sweep_param(path, "thresholdStep", [5, 10, 15, 20], blur=False)         
+    #sweep_param(path, "minDistBetweenBlobs", [10, 20, 30, 40], blur=False)
+    #sweep_param(path, "minConvexity", [ 0.7, 0.8, 0.9, 0.95], blur=False)
+    #sweep_param(path, "minCircularity", [0.2, 0.4, 0.6, 0.8], blur=False)
+    sweep_param(path, "minInertiaRatio", [0.1, 0.2, 0.3, 0.4], blur=False)
