@@ -120,15 +120,30 @@ def blob_detect_n_images(directory: str, n=10, params=None, blur=False, bbox=Fal
         results.append((path, image, keypoints, inverted_keypoints, drawn_image))
     return results
 
+def make_side_by_side(image1: np.ndarray, image2: np.ndarray) -> np.ndarray:
+    """
+    Stack a grayscale image and its drawn BGR version horizontally, scaled up 4x.
+    """
+    image1_bgr = cv2.cvtColor(image1, cv2.COLOR_GRAY2BGR)
+    side_by_side = np.hstack([image1_bgr, image2])
+    return cv2.resize(side_by_side, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
+
+def save_images_side_by_side(image1: np.ndarray, image2: np.ndarray, name: str) -> Path:
+    """
+    Save the same side by side image that display_images_side_by_side shows to out/<name>.png.
+    """
+    out_dir = Path(__file__).resolve().parent / "out"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"{name}.png"
+    cv2.imwrite(str(out_path), make_side_by_side(image1, image2))
+    print("Saved image to", out_path)
+    return out_path
+
 def display_images_side_by_side(image1: np.ndarray, image2: np.ndarray) -> None:
     """
     Display two images side by side for comparison.
     """
-    image1_bgr = cv2.cvtColor(image1, cv2.COLOR_GRAY2BGR)
-    side_by_side = np.hstack([image1_bgr, image2])
-    side_by_side = cv2.resize(side_by_side, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
-
-    cv2.imshow("Before | After", side_by_side)
+    cv2.imshow("Before | After", make_side_by_side(image1, image2))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -206,10 +221,11 @@ if __name__ == "__main__":
 
     directory = "intel-image-classification (1)/seg_test/seg_test/buildings"
 
-    """
+
     for path, image, keypoints, inverted_keypoints, drawn_image in blob_detect_n_images(directory, n=5, bbox=False, blur = False):
         print_blob_stats(keypoints, "Original (red) ")
         print_blob_stats(inverted_keypoints, "Inverted (blue) ")
+        save_images_side_by_side(image, drawn_image, f"blobs_{path.stem}")
         display_images_side_by_side(image, drawn_image)
     """
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
@@ -223,8 +239,8 @@ if __name__ == "__main__":
     print_blob_stats(inverted_keypoints, "Inverted (blue) ")
 
     drawn = draw_blobs(image, keypoints, inverted_keypoints)
-    #display_images_side_by_side(image, drawn)
-
+    display_images_side_by_side(image, drawn)
+    """
     # Thresholds
     #sweep_param(path, "minArea", [20, 25, 30, 35], blur=False)
     #sweep_param(path, "maxArea", [20, 75, 125, 180], blur=False)
@@ -234,4 +250,3 @@ if __name__ == "__main__":
     #sweep_param(path, "minDistBetweenBlobs", [10, 20, 30, 40], blur=False)
     #sweep_param(path, "minConvexity", [ 0.7, 0.8, 0.9, 0.95], blur=False)
     #sweep_param(path, "minCircularity", [0.2, 0.4, 0.6, 0.8], blur=False)
-    sweep_param(path, "minInertiaRatio", [0.1, 0.2, 0.3, 0.4], blur=False)
