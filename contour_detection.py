@@ -2,18 +2,26 @@ import load_image
 import cv2
 import numpy as np
 from pathlib import Path
-from blob_detection import display_images_side_by_side
+from blob_detection import display_images_side_by_side, save_images_side_by_side
 import matplotlib.pyplot as plt
 
-def detect_contours(image, threshold=None, min_area=20, max_area = 10000, blur=True, mode=cv2.RETR_EXTERNAL):
+def detect_contours(image, threshold=None, min_area=20, max_area = 6000, blur_size=0, mode=cv2.RETR_TREE, invert=False):
     # Detect contours in a greyscale image using thresholding and contour finding.
-    # Blur to reduce noise and improve contour detection. 
-    src = cv2.GaussianBlur(image, (5, 5), 0) if blur else image
+    # Invert the image first so dark regions become white and are found as contours.
+    if invert:
+        image = cv2.bitwise_not(image)
+    # Blur with a blur_size x blur_size Gaussian kernel to reduce noise and improve contour detection.
+    # blur_size must be odd (3, 5, 7, ...), 0 means no blur.
+    blur_size = int(blur_size)
+    if blur_size:
+        if blur_size % 2 == 0:
+            raise ValueError(f"blur_size must be odd, got {blur_size}")
+        image = cv2.GaussianBlur(image, (blur_size, blur_size), 0)
     # THRESH_BINARY is used to find white contours on a black background, if you want to find dark spots on a light background, use THRESH_BINARY_INV instead.
     if threshold is None:
-        _, binary = cv2.threshold(src, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     else:
-        _, binary = cv2.threshold(src, threshold, 255, cv2.THRESH_BINARY)
+        _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(binary, mode, cv2.CHAIN_APPROX_SIMPLE)
     return [c for c in contours
                 if cv2.contourArea(c) >= min_area
@@ -38,7 +46,7 @@ def draw_contours(image, contours, thickness=1):
         cv2.drawContours(output, [contour], -1, color, thickness)
     return output
 
-def contour_detect_n_images(directory: str, n=10, threshold=None, min_area=20, blur=True):
+def contour_detect_n_images(directory: str, n=10, threshold=None, min_area=20, blur_size=0, invert=False):
     """
     Run contour detection on the first n images (sorted by filename) in the directory.
     Returns a list of (path, image, contours, drawn_image) tuples.
@@ -48,7 +56,7 @@ def contour_detect_n_images(directory: str, n=10, threshold=None, min_area=20, b
     results = []
     for path in paths:
         image = load_image.load_image(str(path))
-        contours = detect_contours(image, threshold=threshold, min_area=min_area, blur=blur)
+        contours = detect_contours(image, threshold=threshold, min_area=min_area, blur_size=blur_size, invert=invert)
         drawn_image = draw_contours(image, contours)
         results.append((path, image, contours, drawn_image))
     return results
@@ -73,15 +81,15 @@ def print_contour_stats(contours):
           f"Mean Area: {stats['mean_area']:.2f}, Max Area: {stats['max_area']:.2f}, "
           f"Mean Perimeter: {stats['mean_perimeter']:.2f}, Max Perimeter: {stats['max_perimeter']:.2f}")
 
-def sweep_params(path, param_name, start, end, n=5, **fixed_params):
+def sweep_params(path, param_name, values, **fixed_params):
     """
-    Run contour detection on one image while varying a single parameter
-    from start to end in n evenly spaced steps. Extra keyword arguments
-    are passed to detect_contours and kept fixed.
+    Run contour detection on one image once for each value in values for a
+    single parameter. Extra keyword arguments are passed to detect_contours
+    and kept fixed.
     """
     path = Path(path)
     image = load_image.load_image(str(path))
-    values = np.linspace(start, end, n)
+    n = len(values)
 
     fig, axes = plt.subplots(1, n, figsize=(3 * n, 3.5))
     axes = np.atleast_1d(axes)
@@ -100,19 +108,33 @@ def sweep_params(path, param_name, start, end, n=5, **fixed_params):
     fig.suptitle(path.name)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
 
+    out_dir = Path(__file__).resolve().parent / "out" / "contour_sweep"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_inverted" if fixed_params.get("invert") else ""
+    if fixed_params.get("blur_size"):
+        suffix += f"_blur{fixed_params['blur_size']}"
+    out_path = out_dir / f"contour_sweep_{path.stem}_{param_name}{suffix}.png"
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved {out_path}")
+
 if __name__ == "__main__":
 
     directory = "intel-image-classification (1)/seg_test/seg_test/buildings"
-
-    """for path, image, contours, drawn_image in contour_detect_n_images(directory, n=5):
+    """
+    for path, image, contours, drawn_image in contour_detect_n_images(directory, n=5, invert=True):
         print(f"\nImage: {path.name}")
         print_contour_stats(contours)
         display_images_side_by_side(image, drawn_image)
     """
-
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
-    sweep_params(path, "threshold", 50, 200, n=5)
-    #sweep_params(path, "min_area", 5, 300, n=5, threshold=100)
-    #sweep_params(path, "max_area", 1000, 5000, n=5, threshold=1000)
+    """
+    # Run contour detection on one image with the default parameters
+    image = load_image.load_image(path)
+    contours = detect_contours(image)
+    print_contour_stats(contours)
+    drawn_image = draw_contours(image, contours)
+    save_images_side_by_side(image, drawn_image, f"contours_{Path(path).stem}")
+    display_images_side_by_side(image, drawn_image)
+    """
+    sweep_params(path, "blur_size", [0, 3, 5, 7], threshold=90)
     plt.show()
-    
