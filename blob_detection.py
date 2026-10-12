@@ -185,6 +185,59 @@ def collect_stats(root: str, params, blur=False, max_per_category=None) -> pd.Da
     return pd.DataFrame(rows)
 
 
+DATASET = "intel-image-classification/seg_test/seg_test"
+
+# One photo from each scene category in seg_test.
+EXAMPLES = [
+    ("buildings", "20057.jpg"),
+    ("street", "20066.jpg"),
+    ("forest", "20056.jpg"),
+    ("sea", "20072.jpg"),
+    ("glacier", "20059.jpg"),
+    ("mountain", "20058.jpg"),
+]
+
+def print_blob_details(keypoints, label):
+    """Print each blob's center and diameter, not only the summary."""
+    print(f"\n{label} ({len(keypoints)})")
+    for i, kp in enumerate(keypoints, 1):
+        x, y = kp.pt
+        print(f"  {i:3d}  x={x:6.1f}  y={y:6.1f}  size={kp.size:6.2f}")
+
+def run_category_examples(root, examples, params=None, blur=False):
+    """
+    Detect blobs on one image per category, print per-blob stats, and save
+    the marked image next to the grayscale original.
+    """
+    params = params or make_params()
+    root = Path(root)
+    for category, filename in examples:
+        path = root / category / filename
+        image = load_image.load_image(str(path))
+        keypoints, inverted_keypoints = detect_blobs(image, params, blur=blur)
+        drawn = draw_blobs(image, keypoints, inverted_keypoints)
+        print(f"\n=== {category}/{filename} ===")
+        print_blob_details(keypoints, "Dark blobs (red)")
+        print_blob_details(inverted_keypoints, "Bright blobs (blue)")
+        save_images_side_by_side(image, drawn, f"blobs_{category}_{path.stem}")
+
+def summarize_categories(root, max_per_category=20, blur=False):
+    """Average blob counts and sizes over the first images of each category."""
+    df = collect_stats(root, make_params(), blur=blur, max_per_category=max_per_category)
+    summary = (
+        df.groupby("category")[["count", "inverted_count", "mean_size", "inverted_mean_size"]]
+        .mean()
+        .round(2)
+    )
+    print(f"\nMean over the first {max_per_category} images of each category")
+    print(summary.to_string())
+    out_path = Path(__file__).resolve().parent / "out" / "blob_category_summary.csv"
+    out_path.parent.mkdir(exist_ok=True)
+    summary.to_csv(out_path)
+    print("Saved summary to", out_path)
+    return df
+
+
 def sweep_param(path, param_name, values, blur=False, **fixed_params):
     """
     Run blob detection on one image once for each value in values for a single
@@ -219,14 +272,18 @@ def sweep_param(path, param_name, values, blur=False, **fixed_params):
 
 if __name__ == "__main__":
 
-    directory = "intel-image-classification (1)/seg_test/seg_test/buildings"
+    run_category_examples(DATASET, EXAMPLES)
+    summarize_categories(DATASET, max_per_category=20)
 
-
-    for path, image, keypoints, inverted_keypoints, drawn_image in blob_detect_n_images(directory, n=5, bbox=False, blur = False):
-        print_blob_stats(keypoints, "Original (red) ")
-        print_blob_stats(inverted_keypoints, "Inverted (blue) ")
-        save_images_side_by_side(image, drawn_image, f"blobs_{path.stem}")
-        display_images_side_by_side(image, drawn_image)
+    directory = "intel-image-classification/seg_test/seg_test/buildings"
+    if Path(directory).is_dir():
+        for path, image, keypoints, inverted_keypoints, drawn_image in blob_detect_n_images(directory, n=5, bbox=False, blur = False):
+            print_blob_stats(keypoints, "Original (red) ")
+            print_blob_stats(inverted_keypoints, "Inverted (blue) ")
+            save_images_side_by_side(image, drawn_image, f"blobs_{path.stem}")
+            display_images_side_by_side(image, drawn_image)
+    else:
+        print("Skipping building sample; folder not found:", directory)
     """
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
 

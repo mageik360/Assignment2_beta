@@ -1,12 +1,17 @@
 import numpy as np
-import cv2
+import load_image as li
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
+import os
+from dotenv import load_dotenv
 
-image = cv2.imread("intel-image-classification/seg_train/seg_train/buildings/66.jpg", cv2.IMREAD_GRAYSCALE)
+load_dotenv()
 
-if image is None:
-    raise FileNotFoundError("Image could not be loaded")
+image_path = os.getenv("PATH_TEST_IMAGE")
+if image_path is None:
+    raise ValueError("PATH_TEST_IMAGE is not set in .env")
+
+image = li.load_image(image_path)
 
 dft = np.fft.fft2(image.astype(np.float64))
 
