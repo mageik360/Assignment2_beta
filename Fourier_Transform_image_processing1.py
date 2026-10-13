@@ -169,14 +169,29 @@ for i, (percent, reconstructed) in enumerate(zip(percentages, reconstructions), 
 plt.tight_layout()
 plt.show()
 
-# Gaussian noise removed with the existing low-pass filter
-rng = np.random.default_rng(0)
-noisy = np.clip(original + rng.normal(0, 25, original.shape), 0, 255)
-noisy_dft_shifted = np.fft.fftshift(np.fft.fft2(noisy))
-denoised = np.real(np.fft.ifft2(np.fft.ifftshift(noisy_dft_shifted * low_pass)))
+# Gaussian noise removed with a Gaussian low-pass filter
+# The noise is zero-mean and is not clipped before filtering, so the average
+# intensity is unchanged. The Gaussian filter has gain 1 at the DC component,
+# so the filtered image keeps the same brightness as the original. A Gaussian
+# is used instead of the ideal circle to avoid ringing artifacts.
+noise_sigma = 10
+filter_sigma = 30
 
-noisy_mse, _ = quality(original, noisy)
-denoised_mse, _ = quality(original, denoised)
+rng = np.random.default_rng(0)
+noisy = original + rng.normal(0, noise_sigma, original.shape)
+noisy_dft_shifted = np.fft.fftshift(np.fft.fft2(noisy))
+
+gaussian_low_pass = np.exp(-((x - ccol) ** 2 + (y - crow) ** 2) / (2 * filter_sigma ** 2))
+denoised_dft_shifted = noisy_dft_shifted * gaussian_low_pass
+denoised = np.real(np.fft.ifft2(np.fft.ifftshift(denoised_dft_shifted)))
+
+noisy_display = np.clip(noisy, 0, 255)
+denoised_display = np.clip(denoised, 0, 255)
+
+noisy_mse, _ = quality(original, noisy_display)
+denoised_mse, _ = quality(original, denoised_display)
+print(f"Mean intensity: original = {original.mean():.1f}, noisy = {noisy.mean():.1f}, "
+      f"low-pass filtered = {denoised.mean():.1f}")
 print(f"Noisy MSE = {noisy_mse:.2f}")
 print(f"Low-pass filtered MSE = {denoised_mse:.2f}")
 
@@ -184,8 +199,8 @@ plt.figure(figsize=(12, 4))
 for i, (panel, title) in enumerate(
     [
         (original, "Original"),
-        (noisy, f"Noisy, MSE = {noisy_mse:.1f}"),
-        (denoised, f"Low-pass filtered, MSE = {denoised_mse:.1f}"),
+        (noisy_display, f"Noisy, MSE = {noisy_mse:.1f}"),
+        (denoised_display, f"Low-pass filtered, MSE = {denoised_mse:.1f}"),
     ],
     start=1,
 ):
