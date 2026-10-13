@@ -1,6 +1,7 @@
 from PIL import Image
 import numpy as np
 import os
+import random as rd
 
 def load_image(file_path):
     """
@@ -9,13 +10,19 @@ def load_image(file_path):
     image = Image.open(file_path).convert('L')  # Convert to greyscale
     return np.array(image)
   
-def load_image_set(directory_path, max_images, size=(64, 64)):
+def load_image_set(directory_path, max_images, size=(64, 64), random = False):
     """
     Load a set of images from a directory, convert them to greyscale, resize them to a common size,
     and stack them into a numpy array of shape (n_images, height, width).
     """
     images = []
-    for filename in sorted(os.listdir(directory_path)):
+    files = sorted(os.listdir(directory_path))
+
+
+    if random:
+        rd.shuffle(files)
+
+    for filename in files:
         if len(images) >= max_images:
             break
         if filename.lower().endswith(('.png', '.jpg', '.jpeg')):

@@ -5,27 +5,34 @@ from pathlib import Path
 from blob_detection import display_images_side_by_side, save_images_side_by_side
 import matplotlib.pyplot as plt
 
-def detect_contours(image, threshold=None, min_area=20, max_area = 6000, blur_size=0, mode=cv2.RETR_TREE, invert=False):
-    # Detect contours in a greyscale image using thresholding and contour finding.
-    # Invert the image first so dark regions become white and are found as contours.
+def detect_contours(image, threshold=None, min_area=20, max_area=10000, blur_size=0,
+                    mode=cv2.RETR_TREE, invert=False, method="otsu"):
     if invert:
         image = cv2.bitwise_not(image)
-    # Blur with a blur_size x blur_size Gaussian kernel to reduce noise and improve contour detection.
-    # blur_size must be odd (3, 5, 7, ...), 0 means no blur.
     blur_size = int(blur_size)
     if blur_size:
         if blur_size % 2 == 0:
             raise ValueError(f"blur_size must be odd, got {blur_size}")
         image = cv2.GaussianBlur(image, (blur_size, blur_size), 0)
-    # THRESH_BINARY is used to find white contours on a black background, if you want to find dark spots on a light background, use THRESH_BINARY_INV instead.
-    if threshold is None:
-        _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    else:
+
+    if threshold is not None:
         _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+    elif method == "otsu":
+        _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    elif method == "triangle":
+        _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
+    elif method == "adaptive":
+        binary = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 15, 5)
+    elif method == "canny":
+        binary = cv2.Canny(image, 50, 150)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
     contours, _ = cv2.findContours(binary, mode, cv2.CHAIN_APPROX_SIMPLE)
     return [c for c in contours
-                if cv2.contourArea(c) >= min_area
-                and (max_area is None or cv2.contourArea(c) <= max_area)]
+            if cv2.contourArea(c) >= min_area
+            and (max_area is None or cv2.contourArea(c) <= max_area)]
 
 def distinct_colors(n):
     """
@@ -127,14 +134,14 @@ if __name__ == "__main__":
         display_images_side_by_side(image, drawn_image)
     """
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
-    """
+    
     # Run contour detection on one image with the default parameters
     image = load_image.load_image(path)
-    contours = detect_contours(image)
+    contours = detect_contours(image, method = "triangle")
     print_contour_stats(contours)
     drawn_image = draw_contours(image, contours)
     save_images_side_by_side(image, drawn_image, f"contours_{Path(path).stem}")
     display_images_side_by_side(image, drawn_image)
-    """
-    sweep_params(path, "blur_size", [0, 3, 5, 7], threshold=90)
+    
+    #sweep_params(path, "blur_size", [0, 3, 5, 7], threshold = 90)
     plt.show()
