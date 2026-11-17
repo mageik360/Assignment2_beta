@@ -270,7 +270,148 @@ def sweep_param(path, param_name, values, blur=False, **fixed_params):
     print("Saved plot to", out_path)
     plt.show()
 
+# Building images shown in Table 4 of the report.
+TABLE4_BUILDINGS = ["20057.jpg", "20060.jpg", "20061.jpg", "20064.jpg", "20073.jpg", "20074.jpg"]
+
+# Matplotlib colors matching the drawn images: red = dark blobs, blue = bright blobs.
+# The marker shape is a second cue so the two types are not told apart by color alone.
+BLOB_STYLE = {
+    "dark": {"color": "#d62728", "marker": "o", "label": "Dark blobs (red)"},
+    "bright": {"color": "#1f77b4", "marker": "s", "label": "Bright blobs (blue)"},
+}
+
+def centroid_table(path, params=None, blur=False) -> pd.DataFrame:
+    """
+    One row per detected blob with its centroid (x, y) in pixel coordinates
+    (origin top left, y downwards) and its diameter. Blobs get labels D1, D2, ...
+    (dark) and B1, B2, ... (bright), numbered by size, largest first.
+    """
+    params = params or make_params()
+    image = load_image.load_image(str(path))
+    keypoints, inverted_keypoints = detect_blobs(image, params, blur=blur)
+    rows = []
+    for kind, prefix, kps in (("dark", "D", keypoints), ("bright", "B", inverted_keypoints)):
+        for i, kp in enumerate(sorted(kps, key=lambda k: -k.size), 1):
+            rows.append({"file": Path(path).name, "label": f"{prefix}{i}", "type": kind,
+                         "x": round(kp.pt[0], 1), "y": round(kp.pt[1], 1),
+                         "diameter": round(kp.size, 2)})
+    df = pd.DataFrame(rows, columns=["file", "label", "type", "x", "y", "diameter"])
+    return image, df
+
+def spatial_summary(df: pd.DataFrame, height: int) -> pd.DataFrame:
+    """
+    Per image and blob type: count, mean/std of the centroid coordinates, and the
+    share of blobs in the upper half of the image (y < height / 2).
+    """
+    g = df.groupby(["file", "type"])
+    summary = g.agg(count=("x", "size"), mean_x=("x", "mean"), std_x=("x", "std"),
+                    mean_y=("y", "mean"), std_y=("y", "std"))
+    summary["upper_half_pct"] = g["y"].apply(lambda y: 100 * (y < height / 2).mean())
+    return summary.round(1)
+
+def plot_blob_centroids(root, files, params=None, blur=False, n_labels=3):
+    """
+    For each image, show the grayscale image with the detected centroids (the
+    n_labels largest of each type are labeled) next to a scatter of all centroid
+    coordinates in pixel space, with marginal histograms of x and y.
+    Saves the figure, a CSV with every centroid, a CSV with the spatial summary,
+    and prints a LaTeX table with the labeled centroids.
+    """
+    root = Path(root)
+    out_dir = Path(__file__).resolve().parent / "out" / "blob_centroids"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Two buildings per row, each as (image, centroid scatter). A lone building on
+    # the last row is centered.
+    per_row = 2
+    n = len(files)
+    n_rows = -(-n // per_row)
+    fig = plt.figure(figsize=(9 * per_row, 3.6 * n_rows))
+    outer = fig.add_gridspec(n_rows, 2 * per_row, wspace=0.3, hspace=0.45)
+    tables = []
+    for idx, filename in enumerate(files):
+        row, slot = divmod(idx, per_row)
+        in_row = min(per_row, n - row * per_row)
+        col = 2 * slot + (per_row - in_row)
+        image, df = centroid_table(root / filename, params, blur)
+        tables.append(df)
+        h, w = image.shape
+
+        # Left: the image with centroids and labels
+        ax_img = fig.add_subplot(outer[row, col])
+        ax_img.imshow(image, cmap="gray", vmin=0, vmax=255)
+        for kind, style in BLOB_STYLE.items():
+            sub = df[df["type"] == kind]
+            ax_img.scatter(sub["x"], sub["y"], s=14, c=style["color"], marker=style["marker"],
+                           edgecolors="white", linewidths=0.6)
+            for _, r in sub.head(n_labels).iterrows():
+                ax_img.annotate(r["label"], (r["x"], r["y"]), xytext=(3, -3),
+                                textcoords="offset points", fontsize=7, color="black",
+                                bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.8))
+        ax_img.set_title(f"{filename}: {(df.type == 'dark').sum()} dark / "
+                         f"{(df.type == 'bright').sum()} bright", fontsize=9)
+        ax_img.set_xlabel("x (px)", fontsize=8)
+        ax_img.set_ylabel("y (px)", fontsize=8)
+        ax_img.tick_params(labelsize=7)
+
+        # Right: centroid scatter with marginal histograms
+        inner = outer[row, col + 1].subgridspec(2, 2, width_ratios=(4, 1), height_ratios=(1, 4),
+                                          wspace=0.05, hspace=0.05)
+        ax = fig.add_subplot(inner[1, 0])
+        ax_hx = fig.add_subplot(inner[0, 0], sharex=ax)
+        ax_hy = fig.add_subplot(inner[1, 1], sharey=ax)
+        bins = np.linspace(0, max(h, w), 11)
+        for kind, style in BLOB_STYLE.items():
+            sub = df[df["type"] == kind]
+            ax.scatter(sub["x"], sub["y"], s=sub["diameter"] * 4, c=style["color"],
+                       marker=style["marker"], alpha=0.7, edgecolors="white", linewidths=0.5,
+                       label=style["label"])
+            ax_hx.hist(sub["x"], bins=bins, color=style["color"], histtype="step", lw=1.5)
+            ax_hy.hist(sub["y"], bins=bins, color=style["color"], histtype="step", lw=1.5, orientation="horizontal")
+        ax.set_xlim(0, w)
+        ax.set_ylim(h, 0)  # image coordinates: y grows downwards
+        ax.set_aspect("equal", adjustable="box")
+        ax.axhline(h / 2, color="0.7", lw=0.8, ls="--")
+        ax.set_xlabel("centroid x (px)", fontsize=8)
+        ax.set_ylabel("centroid y (px)", fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(color="0.9", lw=0.5)
+        ax_hx.tick_params(labelbottom=False, labelsize=6)
+        ax_hy.tick_params(labelleft=False, labelsize=6)
+        ax_hx.set_ylabel("n", fontsize=7)
+        ax_hy.set_xlabel("n", fontsize=7)
+
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, fontsize=10, frameon=False,
+               bbox_to_anchor=(0.5, 0.94))
+
+    out_path = out_dir / "blob_centroids_buildings.png"
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    print("Saved plot to", out_path)
+
+    all_df = pd.concat(tables, ignore_index=True)
+    all_df.to_csv(out_dir / "blob_centroids_buildings.csv", index=False)
+    summary = spatial_summary(all_df, height=image.shape[0])
+    summary.to_csv(out_dir / "blob_centroid_summary.csv")
+    print("\nSpatial distribution of centroids per image")
+    print(summary.to_string())
+
+    # A few labeled centroids per image, ready for the report
+    labeled = all_df.groupby(["file", "type"]).head(3)
+    print("\n% Labeled blob centroids (3 largest of each type per image)")
+    print("\\begin{tabular}{llrrr}\n\\hline")
+    print("Image & Blob & $x$ (px) & $y$ (px) & Diameter (px) \\\\\n\\hline")
+    for _, r in labeled.iterrows():
+        print(f"{r['file']} & {r['label']} & {r['x']:.1f} & {r['y']:.1f} & {r['diameter']:.1f} \\\\")
+    print("\\hline\n\\end{tabular}")
+    labeled.to_csv(out_dir / "blob_centroids_labeled.csv", index=False)
+    plt.close(fig)
+    return all_df, summary
+
+
 if __name__ == "__main__":
+
+    plot_blob_centroids("intel-image-classification (1)/seg_test/seg_test/buildings", TABLE4_BUILDINGS)
 
     run_category_examples(DATASET, EXAMPLES)
     summarize_categories(DATASET, max_per_category=20)
