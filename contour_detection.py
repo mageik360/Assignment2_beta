@@ -6,7 +6,7 @@ from blob_detection import display_images_side_by_side, save_images_side_by_side
 import matplotlib.pyplot as plt
 
 def detect_contours(image, threshold=None, min_area=20, max_area=10000, blur_size=0,
-                    mode=cv2.RETR_TREE, invert=False, method="otsu"):
+                    mode=cv2.RETR_LIST, invert=False, method="otsu"):
     if invert:
         image = cv2.bitwise_not(image)
     blur_size = int(blur_size)
@@ -124,24 +124,61 @@ def sweep_params(path, param_name, values, **fixed_params):
     fig.savefig(out_path, dpi=150)
     print(f"Saved {out_path}")
 
+def compare_retrieval_modes(path, **params):
+    """
+    Run contour detection on one image with RETR_TREE and RETR_EXTERNAL and
+    show the results side by side. Extra keyword arguments are passed to
+    detect_contours for both runs.
+    """
+    path = Path(path)
+    image = load_image.load_image(str(path))
+    modes = [("RETR_TREE", cv2.RETR_TREE), ("RETR_EXTERNAL", cv2.RETR_EXTERNAL), ("RETR_LIST", cv2.RETR_LIST)]
+
+    fig, axes = plt.subplots(1, len(modes), figsize=(8, 4.5))
+
+    for ax, (name, mode) in zip(axes, modes):
+        contours = detect_contours(image, mode=mode, **params)
+        drawn = draw_contours(image, contours)
+
+        print(f"\n{name}")
+        print_contour_stats(contours)
+
+        ax.imshow(cv2.cvtColor(drawn, cv2.COLOR_BGR2RGB))
+        ax.set_title(f"{name}\n{len(contours)} contours", fontsize=10)
+        ax.axis("off")
+
+    fig.suptitle(path.name)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+
+    out_dir = Path(__file__).resolve().parent / "out" / "contour_modes"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_inverted" if params.get("invert") else ""
+    if params.get("blur_size"):
+        suffix += f"_blur{params['blur_size']}"
+    out_path = out_dir / f"contour_modes_{path.stem}{suffix}.png"
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved {out_path}")
+
 if __name__ == "__main__":
 
     directory = "intel-image-classification (1)/seg_test/seg_test/buildings"
-    """
-    for path, image, contours, drawn_image in contour_detect_n_images(directory, n=5, invert=True):
+    for path, image, contours, drawn_image in contour_detect_n_images(directory, n=5):
         print(f"\nImage: {path.name}")
         print_contour_stats(contours)
         display_images_side_by_side(image, drawn_image)
+        save_images_side_by_side(image, drawn_image, f"contours_{path.stem}")
     """
     path = "intel-image-classification (1)/seg_test/seg_test/buildings/20074.jpg"
     
     # Run contour detection on one image with the default parameters
     image = load_image.load_image(path)
-    contours = detect_contours(image, method = "triangle")
+    contours = detect_contours(image, method = "otsu")
     print_contour_stats(contours)
     drawn_image = draw_contours(image, contours)
     save_images_side_by_side(image, drawn_image, f"contours_{Path(path).stem}")
     display_images_side_by_side(image, drawn_image)
     
     #sweep_params(path, "blur_size", [0, 3, 5, 7], threshold = 90)
+    #compare_retrieval_modes(path, threshold = 90, max_area = 200000)
+    """
     plt.show()
